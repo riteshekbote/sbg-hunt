@@ -1,0 +1,87 @@
+name: sbg-recon
+on:
+  schedule:
+    - cron: "20 2 * * *"
+  workflow_dispatch:
+    inputs:
+      group:
+        description: "comma-separated group to scan (all = everything)"
+        required: false
+        default: "all"
+      brute:
+        description: "perform active resolution (default passive)"
+        required: false
+        default: "false"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        group:
+          - "SKY"      # skybet, skyvegas, skycasino, skybingo, skypoker, sportinglife, super6, itv7, dibz
+          - "PADDY"    # paddypower.*
+          - "BETFAIR"  # betfair.*
+          - "SBG"      # skybettingandgaming.*, sbg*, platformservices, operations, msgsvc, securityservices
+          - "REST"     # ppb.com, rafflee, betviewapi, betsharedservices, skybetservices
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ProjectDiscovery tools
+        run: |
+          mkdir -p /tmp/pd && cd /tmp/pd
+          for tool in subfinder dnsx httpx; do
+            url=$(curl -s https://api.github.com/repos/projectdiscovery/$tool/releases/latest | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for a in d['assets']:
+    if a['name'].endswith('linux_amd64.zip'):
+        print(a['browser_download_url']); break")
+            curl -sL -o t.zip "$url" && unzip -oq t.zip && mv $tool /usr/local/bin/ 2>/dev/null || true
+          done
+          subfinder -version && dnsx -version && httpx -version
+
+      - name: Resolve group seeds
+        id: seeds
+        run: |
+          case "${{ matrix.group }}" in
+            SKY) grep -E "sky|sporting|dibz" recon/scope.txt > /tmp/apex ;;
+            PADDY) grep -E "paddypower" recon/scope.txt > /tmp/apex ;;
+            BETFAIR) grep -E "^betfair" recon/scope.txt > /tmp/apex ;;
+            SBG) grep -E "sbg|skybetting|skybetservices|msgsvc|operationstechnology|securityservices|platformservices|ppb|ppbdev|betshared|betview" recon/scope.txt > /tmp/apex ;;
+            REST) grep -E "raffle|bear" recon/scope.txt >> /tmp/apex ;;
+            *) cat recon/scope.txt > /tmp/apex ;;
+          esac
+          wc -l /tmp/apex
+
+      - name: Passive subdomain enumeration
+        run: |
+          subfinder -silent -all -list /tmp/apex -o /tmp/subs.txt 2>/dev/null || true
+          wc -l /tmp/subs.txt
+
+      - name: Active resolution
+        run: |
+          dnsx -l /tmp/subs.txt -silent -o /tmp/aliwe.txt 2>/dev/null || true
+          wc -l /tmp/aliwe.txt
+
+      - name: HTTP probing
+        run: |
+          httpx -l /tmp/aliwe.txt -silent -o /tmp/live.txt -title -sc -td -timeout 10 -retries 1 -no-color 2>/dev/null || true
+          wc -l /tmp/live.txt || true
+
+      - name: Save results
+        run: |
+          mkdir -p out
+          cp /tmp/subs.txt out/${{ matrix.group }}-subs.txt 2>/dev/null || true
+          cp /tmp/aliwe.txt out/${{ matrix.group }}-resolved.txt 2>/dev/null || true
+          cp /tmp/live.txt out/${{ matrix.group }}-live.txt 2>/dev/null || true
+          ls out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbg-${{ matrix.group }}
+          path: out/
+          retention-days: 7
