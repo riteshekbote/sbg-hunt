@@ -34,12 +34,7 @@ jobs:
         run: |
           mkdir -p /tmp/pd && cd /tmp/pd
           for tool in subfinder dnsx httpx; do
-            url=$(curl -s https://api.github.com/repos/projectdiscovery/$tool/releases/latest | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-for a in d['assets']:
-    if a['name'].endswith('linux_amd64.zip'):
-        print(a['browser_download_url']); break")
+            url=$(curl -s https://api.github.com/repos/projectdiscovery/$tool/releases/latest | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(a["browser_download_url"] for a in d["assets"] if a["name"].endswith("linux_amd64.zip")))')
             curl -sL -o t.zip "$url" && unzip -oq t.zip && mv $tool /usr/local/bin/ 2>/dev/null || true
           done
           subfinder -version && dnsx -version && httpx -version
